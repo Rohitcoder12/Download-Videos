@@ -5,7 +5,16 @@ import logging
 import yt_dlp
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from config import BOT_TOKEN, DUMB_CHANNEL_ID
+
+# --- Get configuration from Environment Variables ---
+# This is the standard way to handle secrets in cloud deployments.
+# We add a fallback value for local testing, but Koyeb will provide the real values.
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+try:
+    DUMB_CHANNEL_ID = int(os.getenv("DUMB_CHANNEL_ID"))
+except (TypeError, ValueError):
+    # Handle case where the environment variable is not set or is not a valid integer
+    DUMB_CHANNEL_ID = None
 
 # --- Basic Logging Setup ---
 logging.basicConfig(
@@ -24,7 +33,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=None,
     )
     await update.message.reply_text(
-        "Send me a link to a video from a supported platform, and I'll download it for you."
+        "I am an educational video downloader. Send me a link from a supported platform."
     )
 
 # --- Main Message Handler ---
@@ -32,16 +41,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles video links sent by the user."""
     url = update.message.text
-    user_id = update.effective_user.id
     
     # Send a "processing" message
     processing_message = await update.message.reply_text("⏳ Processing your link... Please wait.")
+    
+    # Use a temporary directory for downloads that is cleaned up automatically
+    temp_dir = f"temp_{update.update_id}"
+    os.makedirs(temp_dir, exist_ok=True)
+    video_path_template = os.path.join(temp_dir, '%(id)s.%(ext)s')
 
     try:
         # --- yt-dlp Options ---
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': '%(id)s.%(ext)s', # Output filename template
+            'outtmpl': video_path_template,
             'noplaylist': True,
             'quiet': True,
             'merge_output_format': 'mp4'
@@ -57,7 +70,7 @@ async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             thumbnail_url = info_dict.get('thumbnail', None)
             uploader = info_dict.get('uploader', 'N/A')
 
-        video_filename = f"{video_id}.{video_ext}"
+        video_filename = os.path.join(temp_dir, f"{video_id}.{video_ext}")
 
         # --- 2. Download the Video ---
         await processing_message.edit_text(f"📥 Downloading: *{video_title}*")
@@ -76,15 +89,13 @@ async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"🔗 **Source:** [Link]({url})"
         )
         
-        # Download thumbnail to a file if it exists
         thumb_path = None
         if thumbnail_url:
-            thumb_path = f"{video_id}.jpg"
-            # Using yt-dlp to download the thumbnail to avoid another dependency like requests
-            with yt_dlp.YoutubeDL({'outtmpl': thumb_path, 'quiet': True}) as ydl_thumb:
+            thumb_path = os.path.join(temp_dir, f"{video_id}.jpg")
+            with yt_dlp.YoutubeDL({'outtmpl': thumb_path, 'quiet': True, 'noplaylist': True}) as ydl_thumb:
                 ydl_thumb.download([thumbnail_url])
             if not os.path.exists(thumb_path):
-                thumb_path = None # Failed to download
+                thumb_path = None
 
         # --- 4. Upload to Dumb Channel ---
         await processing_message.edit_text("📤 Uploading to channel...")
@@ -104,33 +115,35 @@ async def handle_video_link(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if thumb_to_upload:
                 thumb_to_upload.close()
 
-        # --- 5. Final Notification and Cleanup ---
+        # --- 5. Final Notification ---
         await processing_message.edit_text("✅ Done! Your video has been saved to the channel.")
         
-        # Clean up local files
-        if os.path.exists(video_filename):
-            os.remove(video_filename)
-        if thumb_path and os.path.exists(thumb_path):
-            os.remove(thumb_path)
-
     except Exception as e:
         logger.error(f"Error processing {url}: {e}")
-        await processing_message.edit_text(f"❌ An error occurred: {e}")
-        # Clean up if a file was partially downloaded
-        if 'video_filename' in locals() and os.path.exists(video_filename):
-            os.remove(video_filename)
+        await processing_message.edit_text(f"❌ An error occurred. Please check the logs.")
+    finally:
+        # --- 6. Cleanup ---
+        # Clean up local files and directories to keep the container clean
+        if os.path.exists(temp_dir):
+            for file in os.listdir(temp_dir):
+                os.remove(os.path.join(temp_dir, file))
+            os.rmdir(temp_dir)
 
 
 def main() -> None:
     """Start the bot."""
+    if not all([BOT_TOKEN, DUMB_CHANNEL_ID]):
+        logger.error("FATAL: BOT_TOKEN or DUMB_CHANNEL_ID environment variables are not set.")
+        return
+
     application = Application.builder().token(BOT_TOKEN).build()
 
     # Register handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_video_link))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Entity("url"), handle_video_link))
 
     # Run the bot until the user presses Ctrl-C
-    print("Bot is running...")
+    logger.info("Bot is starting...")
     application.run_polling()
 
 
