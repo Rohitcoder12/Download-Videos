@@ -3,32 +3,31 @@ import uuid
 from yt_dlp import YoutubeDL
 
 def download_video(url):
-    video_id = str(uuid.uuid4())
-    output_path = f"{video_id}.%(ext)s"
-    thumbnail_path = f"{video_id}.jpg"
-
-    ydl_opts = {
-        "format": "bestvideo+bestaudio/best",
-        "outtmpl": output_path,
-        "writethumbnail": True,
-        "merge_output_format": "mp4",
-        "postprocessors": [
-            {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"},
-            {"key": "EmbedThumbnail"},
-            {"key": "FFmpegMetadata"},
-        ],
-        "quiet": True,
+    """
+    Download a video from the given URL using yt-dlp.
+    Returns (video_path, title) on success, or None on failure.
+    """
+    # Unique temporary filename
+    temp_id = str(uuid.uuid4())
+    output = f"downloads/{temp_id}.%(ext)s"
+    options = {
+        'format': 'bestvideo+bestaudio/best',
+        'outtmpl': output,
+        'merge_output_format': 'mp4',
+        'quiet': True,
+        'no_warnings': True,
+        'noplaylist': True,
     }
 
     try:
-        with YoutubeDL(ydl_opts) as ydl:
+        with YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=True)
-            title = info.get("title", "Video")
-            filename = ydl.prepare_filename(info).replace(".webm", ".mp4").replace(".mkv", ".mp4")
-            if os.path.exists(filename):
-                if os.path.exists(thumbnail_path):
-                    return filename, thumbnail_path, title
-                return filename, None, title
+            file_path = ydl.prepare_filename(info)
+            ext = info.get('ext', 'mp4')
+            if not file_path.endswith(f".{ext}"):
+                file_path += f".{ext}"
+            title = info.get("title", "Downloaded Video")
+            return file_path, title
     except Exception as e:
-        print(f"Download error: {e}")
-    return None
+        print(f"[downloader error] {e}")
+        return None
