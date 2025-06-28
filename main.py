@@ -1,10 +1,19 @@
 import os
 import yt_dlp
+from fastapi import FastAPI, Request
 from telegram import Update, InputFile
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import AIORateLimiter
+from telegram.ext import Defaults
+from telegram.ext import WebhookHandler
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-DUMP_CHANNEL_ID = os.environ.get("DUMP_CHANNEL_ID")
+# ENV VARS
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+DUMP_CHANNEL_ID = os.environ["DUMP_CHANNEL_ID"]
+WEBHOOK_URL = os.environ["WEBHOOK_URL"]  # full URL like https://<koyeb-app>.koyeb.app/webhook
+
+app = FastAPI()
+application = None
 
 YDL_OPTS = {
     'format': 'bestvideo+bestaudio/best',
@@ -19,15 +28,15 @@ YDL_OPTS = {
 }
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send me a video URL, and I’ll fetch it.")
+    await update.message.reply_text("👋 Send me a video URL.")
 
 async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
     if not url.startswith("http"):
-        await update.message.reply_text("Please send a valid video URL.")
+        await update.message.reply_text("Please send a valid URL.")
         return
 
-    await update.message.reply_text("Downloading...")
+    await update.message.reply_text("⏬ Downloading...")
 
     try:
         os.makedirs('downloads', exist_ok=True)
@@ -46,20 +55,32 @@ async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_video(video=video, caption=caption, parse_mode="HTML", thumbnail=thumb)
                 await context.bot.send_video(DUMP_CHANNEL_ID, video=video, caption=caption, parse_mode="HTML", thumbnail=thumb)
         else:
-            await update.message.reply_text("File too large for Telegram.")
+            await update.message.reply_text("⚠️ File too large for Telegram.")
 
         os.remove(filename)
         if os.path.exists(thumbnail_path):
             os.remove(thumbnail_path)
 
     except Exception as e:
-        await update.message.reply_text(f"Download failed: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
 
-def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download))
-    app.run_polling()
+@app.on_event("startup")
+async def on_startup():
+    global application
+    application = Application.builder()\
+        .token(BOT_TOKEN)\
+        .defaults(Defaults(parse_mode="HTML"))\
+        .rate_limiter(AIORateLimiter())\
+        .build()
 
-if __name__ == "__main__":
-    main()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download))
+
+    webhook_url = f"{WEBHOOK_URL}/webhook"
+    await application.bot.set_webhook(webhook_url)
+    print("🔗 Webhook set:", webhook_url)
+
+@app.post("/webhook")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, application.bot)
