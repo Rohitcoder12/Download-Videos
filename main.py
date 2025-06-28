@@ -1,86 +1,46 @@
-import os
-import yt_dlp
 from fastapi import FastAPI, Request
-from telegram import Update, InputFile
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.ext import AIORateLimiter
-from telegram.ext import Defaults
-from telegram.ext import WebhookHandler
+from telegram import Update
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
+import os
+import asyncio
 
-# ENV VARS
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-DUMP_CHANNEL_ID = os.environ["DUMP_CHANNEL_ID"]
-WEBHOOK_URL = os.environ["WEBHOOK_URL"]  # full URL like https://<koyeb-app>.koyeb.app/webhook
+TOKEN = os.getenv("BOT_TOKEN")  # Set this in Koyeb's environment variables
 
 app = FastAPI()
-application = None
 
-YDL_OPTS = {
-    'format': 'bestvideo+bestaudio/best',
-    'outtmpl': 'downloads/%(title).100s.%(ext)s',
-    'writethumbnail': True,
-    'writeinfojson': False,
-    'postprocessors': [
-        {'key': 'EmbedThumbnail'},
-        {'key': 'FFmpegMetadata'}
-    ],
-    'quiet': True
-}
+# Initialize the Telegram bot application
+telegram_app: Application = ApplicationBuilder().token(TOKEN).build()
 
+# --- Define Bot Command Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Send me a video URL.")
+    await update.message.reply_text("Hello! I'm alive and running on webhook via Koyeb 🚀")
 
-async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text
-    if not url.startswith("http"):
-        await update.message.reply_text("Please send a valid URL.")
-        return
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Use /start to test this bot.")
 
-    await update.message.reply_text("⏬ Downloading...")
+# Add handlers to the Telegram app
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(CommandHandler("help", help_command))
 
-    try:
-        os.makedirs('downloads', exist_ok=True)
+# --- FastAPI endpoint for Telegram webhook ---
+@app.post("/webhook")
+async def webhook_handler(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.process_update(update)
+    return {"status": "ok"}
 
-        with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            thumbnail_path = filename.rsplit(".", 1)[0] + ".jpg"
-            title = info.get("title", "Video")
-
-        caption = f"🎬 <b>{title}</b>\n🔗 {url}"
-
-        if os.path.getsize(filename) < 50 * 1024 * 1024:
-            with open(filename, 'rb') as video, \
-                 open(thumbnail_path, 'rb') if os.path.exists(thumbnail_path) else None as thumb:
-                await update.message.reply_video(video=video, caption=caption, parse_mode="HTML", thumbnail=thumb)
-                await context.bot.send_video(DUMP_CHANNEL_ID, video=video, caption=caption, parse_mode="HTML", thumbnail=thumb)
-        else:
-            await update.message.reply_text("⚠️ File too large for Telegram.")
-
-        os.remove(filename)
-        if os.path.exists(thumbnail_path):
-            os.remove(thumbnail_path)
-
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error: {str(e)}")
-
+# --- Start webhook setup when app launches ---
 @app.on_event("startup")
 async def on_startup():
-    global application
-    application = Application.builder()\
-        .token(BOT_TOKEN)\
-        .defaults(Defaults(parse_mode="HTML"))\
-        .rate_limiter(AIORateLimiter())\
-        .build()
+    webhook_url = os.getenv("WEBHOOK_URL")  # Should be your Koyeb HTTPS endpoint
+    if not webhook_url:
+        raise ValueError("WEBHOOK_URL not set in environment variables.")
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, download))
+    await telegram_app.bot.set_webhook(url=f"{webhook_url}/webhook")
+    print(f"Webhook set to: {webhook_url}/webhook ✅")
 
-    webhook_url = f"{WEBHOOK_URL}/webhook"
-    await application.bot.set_webhook(webhook_url)
-    print("🔗 Webhook set:", webhook_url)
-
-@app.post("/webhook")
-async def telegram_webhook(req: Request):
-    data = await req.json()
-    update = Update.de_json(data, application.bot)
+# --- Optional health check route ---
+@app.get("/")
+async def root():
+    return {"message": "Bot is running!"}
