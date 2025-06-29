@@ -11,10 +11,11 @@ services:
       - key: PYTHON_VERSION
         value: 3.10.6
       - key: BOT_TOKEN
-        sync: false
+        sync: false # Set this in the Render dashboard
       - key: DUMP_CHANNEL_ID
-        sync: false
-      - key: RENDER_APP_NAME
+        sync: false # Set this in the Render dashboard
+      - key: RENDER_APP_NAME # This key gets its value from the service itself
         fromService:
           type: web
-          name: telegram-video-bot
+          name: telegram-video-bot # Must match the 'name' field on line 3
+          property: name # We want the 'name' property of the service
