@@ -11,18 +11,15 @@ logger = logging.getLogger(__name__)
 # --- CONFIGURATION FROM ENVIRONMENT VARIABLES ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 DUMP_CHANNEL_ID = os.environ.get('DUMP_CHANNEL_ID')
-# RENDER_EXTERNAL_URL is automatically provided by Render.
-# It will be like "https://your-app-name.onrender.com"
 WEBHOOK_URL_BASE = os.environ.get('RENDER_EXTERNAL_URL')
 PORT = int(os.environ.get('PORT', '8443'))
 
-# --- BOT FUNCTIONS (No changes needed here) ---
+# --- BOT FUNCTIONS ---
 
 def start(update, context):
     update.message.reply_text("Hi! Send me a YouTube link. I will archive it and forward a copy to you.")
 
 def process_video_link(update, context):
-    # This function remains exactly the same as before
     message = update.message
     link = message.text
     user_chat_id = update.effective_chat.id
@@ -38,12 +35,19 @@ def process_video_link(update, context):
     try:
         processing_msg = message.reply_text("✅ Link received. Processing video...")
 
+        # --- THIS IS THE UPDATED SECTION ---
         ydl_opts = {
             'format': 'best[ext=mp4][height<=720]/best[ext=mp4]/best',
             'outtmpl': '/tmp/%(id)s.%(ext)s',
             'writethumbnail': True,
             'noplaylist': True,
+            # Add a browser-like User-Agent to help avoid bot detection
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
+            }
         }
+        # --- END OF UPDATED SECTION ---
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(link, download=True)
             video_id = info_dict.get('id', None)
@@ -83,8 +87,15 @@ def process_video_link(update, context):
 
     except Exception as e:
         logger.error(f"An error occurred: {e}", exc_info=True)
+        # Give a more user-friendly error message
+        error_message = str(e)
+        if "Sign in to confirm you're not a bot" in error_message:
+            display_error = "YouTube is blocking this download. Please try another video."
+        else:
+            display_error = "An error occurred while processing the video."
+        
         if processing_msg:
-            processing_msg.edit_text(f"❌ An error occurred. Check logs.")
+            processing_msg.edit_text(f"❌ {display_error}")
 
     finally:
         if video_filename and os.path.exists(video_filename):
@@ -99,7 +110,6 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, process_video_link))
 
-    # Construct the final webhook URL using the base URL from Render
     webhook_url = f"{WEBHOOK_URL_BASE}/{BOT_TOKEN}"
     logger.info(f"Setting webhook to {webhook_url}")
     
