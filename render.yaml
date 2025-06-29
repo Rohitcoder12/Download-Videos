@@ -2,19 +2,19 @@ services:
   - type: web
     name: telegram-video-bot
     env: python
-    plan: free # Or your desired plan
+    plan: free
     buildCommand: |
       pip install -r requirements.txt
       apt-get update && apt-get install -y ffmpeg
-    startCommand: python main.py
+    startCommand: python main.py  # <-- CORRECTED LINE
     envVars:
       - key: PYTHON_VERSION
-        value: 3.10.6 # Or your preferred Python version
+        value: 3.10.6
       - key: BOT_TOKEN
-        sync: false # Set this in the Render dashboard
+        sync: false
       - key: DUMP_CHANNEL_ID
-        sync: false # Set this in the Render dashboard
+        sync: false
       - key: RENDER_APP_NAME
         fromService:
           type: web
-          name: telegram-video-bot # Must match the 'name' field above
+          name: telegram-video-bot
