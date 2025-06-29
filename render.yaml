@@ -1,13 +1,11 @@
 services:
   - type: web
     name: telegram-video-bot
-    env: python
+    # Tell Render to use Docker instead of Python
+    env: docker
     plan: free
-    buildCommand: "pip install -r requirements.txt && apt-get update && apt-get install -y ffmpeg"
-    startCommand: python main.py
+    # Dockerfile path is automatically detected
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.6
       - key: BOT_TOKEN
         sync: false
       - key: DUMP_CHANNEL_ID
