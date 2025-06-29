@@ -11,15 +11,18 @@ logger = logging.getLogger(__name__)
 # --- CONFIGURATION FROM ENVIRONMENT VARIABLES ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 DUMP_CHANNEL_ID = os.environ.get('DUMP_CHANNEL_ID')
-APP_NAME = os.environ.get('RENDER_APP_NAME')
+# RENDER_EXTERNAL_URL is automatically provided by Render.
+# It will be like "https://your-app-name.onrender.com"
+WEBHOOK_URL_BASE = os.environ.get('RENDER_EXTERNAL_URL')
 PORT = int(os.environ.get('PORT', '8443'))
 
-# --- BOT FUNCTIONS ---
+# --- BOT FUNCTIONS (No changes needed here) ---
 
 def start(update, context):
     update.message.reply_text("Hi! Send me a YouTube link. I will archive it and forward a copy to you.")
 
 def process_video_link(update, context):
+    # This function remains exactly the same as before
     message = update.message
     link = message.text
     user_chat_id = update.effective_chat.id
@@ -96,7 +99,8 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, process_video_link))
 
-    webhook_url = f"https://{APP_NAME}.onrender.com/{BOT_TOKEN}"
+    # Construct the final webhook URL using the base URL from Render
+    webhook_url = f"{WEBHOOK_URL_BASE}/{BOT_TOKEN}"
     logger.info(f"Setting webhook to {webhook_url}")
     
     updater.start_webhook(listen="0.0.0.0",
